@@ -224,7 +224,7 @@ docker run -d --name p2p-azn-bot --restart unless-stopped --env-file .env -v p2p
 | `TELEGRAM_BOT_TOKEN`        | —            | Токен от BotFather **(обязательно)**                                                                                                                             |
 | `TELEGRAM_ALLOWED_USER_IDS` | —            | Числовые Telegram ID через запятую **(обязательно)**; первый — владелец. Остальные получают `Access denied.` Старое имя `TELEGRAM_ALLOWED_USER_ID` тоже работает |
 | `MIN_RATE`                  | `1.70`       | Порог, который получает новый пользователь. Дальше каждый меняет свой через `/rate`; значения хранятся в `state.json`                                            |
-| `POLL_INTERVAL_SECONDS`     | `45`         | Интервал опроса. Меньше 30 не допускается (принудительно 30)                                                                                                     |
+| `POLL_INTERVAL_SECONDS`     | `45`         | Интервал опроса. Меньше 7 не допускается (принудительно 7)                                                                                                       |
 | `NOTIFIED_TTL_HOURS`        | `24`         | Через сколько часов «не виденное» объявление удаляется из памяти                                                                                                 |
 | `CHECK_TOP_N`               | `5`          | Сколько объявлений показывать в `/check`                                                                                                                         |
 | `ASSET` / `FIAT`            | `USDT`/`AZN` | Пара                                                                                                                                                             |

@@ -76,7 +76,7 @@ export interface AppConfig {
   timezone: string;
 }
 
-export const MIN_POLL_INTERVAL_SECONDS = 30;
+export const MIN_POLL_INTERVAL_SECONDS = 7;
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const parsed = envSchema.safeParse(env);
