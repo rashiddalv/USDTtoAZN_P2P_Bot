@@ -1,0 +1,20 @@
+# Optional: single-service compose file for convenience (restart policy + persistent volume).
+services:
+  bot:
+    build: .
+    container_name: binance-p2p-azn-bot
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATA_DIR: /data
+      TZ: Asia/Baku
+    volumes:
+      - bot-data:/data
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
+
+volumes:
+  bot-data:
