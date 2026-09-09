@@ -2,10 +2,15 @@ import type { P2PAd } from '../services/binanceP2P.types.js';
 import type { MonitorStats } from '../storage/stateStore.js';
 import {
   escapeHtml,
+  formatCompact,
   formatDateTime,
   formatDuration,
+  formatInt,
   formatNumber,
+  formatPaymentMethods,
   formatPercent,
+  formatPercentShort,
+  formatShortDateTime,
 } from '../utils/format.js';
 
 export interface StatusInfo {
@@ -84,12 +89,19 @@ export function adAlertMessage(ad: P2PAd, minRate: number): string {
   ].join('\n');
 }
 
+/**
+ * One ad = three short lines, no indentation. Every line is kept under ~32 characters
+ * so it does not wrap on a phone screen, which is what made the old layout unreadable.
+ */
 function adCompactCard(ad: P2PAd, index: number, minRate: number): string {
-  const ok = ad.price >= minRate ? '✅' : '▫️';
+  const a = ad.advertiser;
+  const ok = ad.price >= minRate ? '✅' : '▪️';
+  const badge = a.isMerchant ? ' ✔️' : '';
+  const orders = a.monthOrderCount ?? 'n/a';
   return [
-    `${ok} <b>${index}. ${formatNumber(ad.price, 4)} ${e(ad.fiat)}</b> — ${e(ad.advertiser.nickName)}${ad.advertiser.isMerchant ? ' ✔️' : ''}`,
-    `      💰 ${formatNumber(ad.availableAsset)} ${e(ad.asset)} · 📊 ${formatNumber(ad.minFiat)}–${formatNumber(ad.maxFiat)}`,
-    `      ${trustIcon(ad.advertiser.completionRate)} ${formatPercent(ad.advertiser.completionRate)} · 🔄 ${ad.advertiser.monthOrderCount ?? 'n/a'} · 🏦 ${e(ad.paymentMethods.join(', ') || 'n/a')}`,
+    `${ok} <b>${index}. ${formatNumber(ad.price, 4)}</b> · ${e(a.nickName)}${badge}`,
+    `${formatCompact(ad.availableAsset)} ${e(ad.asset)} · ${formatInt(ad.minFiat)}–${formatInt(ad.maxFiat)} ${e(ad.fiat)}`,
+    `${trustIcon(a.completionRate)} ${formatPercentShort(a.completionRate)} · ${orders} сд. · ${e(formatPaymentMethods(ad.paymentMethods))}`,
   ].join('\n');
 }
 
@@ -113,20 +125,18 @@ export function checkResultMessage(
   const gap = best.price - minRate;
   const verdict =
     matches.length > 0
-      ? `✅ <b>Подходящих: ${matches.length}</b> из ${ads.length}`
-      : `📉 Порог не достигнут · до порога <b>${formatNumber(-gap, 4)}</b>`;
+      ? `✅ Подходящих: <b>${matches.length}</b> из ${ads.length}`
+      : `📉 До порога: <b>${formatNumber(-gap, 4)}</b>`;
   const shown = (matches.length > 0 ? matches : ads).slice(0, topN);
 
   const text = [
-    `🔍 <b>${e(asset)} → ${e(fiat)}</b> · продажа ${e(asset)}`,
-    `<i>${formatDateTime(checkedAt, timezone)}</i>`,
-    '',
-    `🏆 Лучший курс: <b>${formatNumber(best.price, 4)}</b> · порог ≥ ${formatNumber(minRate, 4)}`,
+    `🔍 <b>${e(asset)} → ${e(fiat)}</b> · ${formatShortDateTime(checkedAt, timezone)}`,
+    `🏆 Лучший <b>${formatNumber(best.price, 4)}</b> · порог ${formatNumber(minRate, 4)}`,
     verdict,
     '',
-    ...shown.map((ad, i) => adCompactCard(ad, i + 1, minRate)),
+    shown.map((ad, i) => adCompactCard(ad, i + 1, minRate)).join('\n\n'),
     '',
-    `<i>Нажмите на объявление ниже, чтобы открыть трейдера в приложении Binance.</i>`,
+    `<i>Кнопки ниже открывают трейдера в Binance.</i>`,
   ].join('\n');
   return { text, shown };
 }
