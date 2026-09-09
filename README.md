@@ -1,6 +1,6 @@
 # Binance P2P USDT/AZN Alert Bot
 
-Telegram-бот на **Node.js + TypeScript**, который каждые 30–60 секунд проверяет публичные объявления
+Telegram-бот на **Node.js + TypeScript**, который каждые несколько секунд проверяет публичные объявления
 **Binance P2P** по паре **USDT/AZN** и присылает уведомление, когда появляется контрагент, готовый
 **купить ваш USDT** по курсу **≥ заданного порога** (по умолчанию `1.70 AZN`).
 
@@ -230,7 +230,7 @@ docker run -d --name p2p-azn-bot --restart unless-stopped --env-file .env -v p2p
 | `ASSET` / `FIAT`            | `USDT`/`AZN` | Пара                                                                                                                                                             |
 | `BINANCE_TIMEOUT_MS`        | `15000`      | Таймаут одного запроса                                                                                                                                           |
 | `BINANCE_RETRY_ATTEMPTS`    | `3`          | Попыток на один запрос (backoff 1s → 2s → 4s… + jitter, максимум 20s)                                                                                            |
-| `BINANCE_MAX_PAGES`         | `3`          | Максимум страниц (по 20 объявлений); следующая страница запрашивается только если последнее объявление ещё ≥ порога                                              |
+| `BINANCE_MAX_PAGES`         | `1`          | Максимум страниц (по 20 объявлений); следующая страница запрашивается только если последнее объявление ещё ≥ порога                                              |
 | `DATA_DIR`                  | `./data`     | Папка для `state.json`                                                                                                                                           |
 | `LOG_LEVEL`                 | `info`       | `trace`/`debug`/`info`/`warn`/`error`                                                                                                                            |
 | `LOG_FORMAT`                | `json`       | `json` (structured, для production) или `pretty` (для разработки)                                                                                                |

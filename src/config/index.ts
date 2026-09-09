@@ -42,7 +42,7 @@ const envSchema = z.object({
   FIAT: z.string().trim().toUpperCase().default('AZN'),
   BINANCE_TIMEOUT_MS: numberFromEnv(15_000).pipe(z.number().int().min(1_000)),
   BINANCE_RETRY_ATTEMPTS: numberFromEnv(3).pipe(z.number().int().min(1).max(10)),
-  BINANCE_MAX_PAGES: numberFromEnv(3).pipe(z.number().int().min(1).max(10)),
+  BINANCE_MAX_PAGES: numberFromEnv(1).pipe(z.number().int().min(1).max(10)),
 
   DATA_DIR: z.string().default('./data'),
   LOG_LEVEL: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'fatal']).default('info'),
