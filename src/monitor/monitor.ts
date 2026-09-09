@@ -12,21 +12,40 @@ export interface MonitorOptions {
   pollIntervalMs: number;
   notifiedTtlMs: number;
   maxPages: number;
-  /** Called with ads that crossed the threshold; must not throw. */
-  onNewMatches: (ads: P2PAd[], minRate: number) => Promise<void>;
+  /** Threshold used for the Binance request when no user has registered yet. */
+  defaultMinRate: number;
+  /**
+   * Users to evaluate on every check. Users present in the store but not listed here
+   * (e.g. removed from the config) are skipped and receive nothing.
+   */
+  allowedUserIds: readonly number[];
+  /** Called per user with ads that crossed *that user's* threshold; must not throw. */
+  onNewMatches: (userId: number, ads: P2PAd[], minRate: number) => Promise<void>;
+}
+
+export interface UserCheckResult {
+  userId: number;
+  minRate: number;
+  matches: P2PAd[];
+  notified: P2PAd[];
 }
 
 export interface CheckResult {
+  /** All ads returned by Binance, best price first. */
   ads: P2PAd[];
-  matches: P2PAd[];
-  notified: P2PAd[];
-  minRate: number;
+  /** Per-user evaluation; only users registered at the time of the check are present. */
+  users: Map<number, UserCheckResult>;
+  /** Lowest threshold across users; drove pagination of the Binance request. */
+  fetchMinRate: number;
   checkedAt: Date;
 }
 
 /**
  * Background polling loop. Independent of Telegram: it keeps running whether or not
  * anyone talks to the bot. One failed check never stops the loop.
+ *
+ * One Binance request per check serves every user: ads are fetched down to the lowest
+ * threshold and then matched against each user's own threshold and ad history.
  */
 export class Monitor {
   private readonly log: Logger;
@@ -104,9 +123,19 @@ export class Monitor {
     }
   }
 
+  /** Registered users that are still allowed by the config. */
+  private activeUserIds(): number[] {
+    const { store, allowedUserIds } = this.opts;
+    return allowedUserIds.filter((id) => store.hasUser(id));
+  }
+
   private async runCheck(): Promise<CheckResult> {
     const { store, provider } = this.opts;
-    const minRate = store.minRate;
+    const userIds = this.activeUserIds();
+    const fetchMinRate =
+      userIds.length > 0
+        ? Math.min(...userIds.map((id) => store.getMinRate(id)))
+        : this.opts.defaultMinRate;
     const checkedAt = new Date();
     store.updateStats({ totalChecks: store.stats.totalChecks + 1 });
 
@@ -114,7 +143,7 @@ export class Monitor {
     try {
       ads = await provider.fetchBuyerAds({
         maxPages: this.opts.maxPages,
-        minPrice: minRate,
+        minPrice: fetchMinRate,
         signal: this.abort.signal,
       });
     } catch (err) {
@@ -126,13 +155,19 @@ export class Monitor {
       throw err;
     }
 
-    const { matches, toNotify, tracks } = evaluateAds(
-      ads,
-      minRate,
-      (id) => store.getAd(id),
-      checkedAt,
-    );
-    for (const [id, track] of tracks) store.setAd(id, track);
+    const users = new Map<number, UserCheckResult>();
+    for (const userId of userIds) {
+      const minRate = store.getMinRate(userId);
+      const { matches, toNotify, tracks } = evaluateAds(
+        ads,
+        minRate,
+        (id) => store.getAd(userId, id),
+        checkedAt,
+      );
+      for (const [id, track] of tracks) store.setAd(userId, id, track);
+      store.updateUser(userId, { lastMatchCount: matches.length });
+      users.set(userId, { userId, minRate, matches, notified: toNotify });
+    }
     const pruned = store.pruneAds(this.opts.notifiedTtlMs, checkedAt);
 
     const best = ads[0]?.price ?? null;
@@ -140,7 +175,6 @@ export class Monitor {
       lastSuccessfulCheckAt: checkedAt.toISOString(),
       lastCheckError: null,
       lastAdsCount: ads.length,
-      lastMatchCount: matches.length,
       bestPriceSeen:
         best !== null && (store.stats.bestPriceSeen === null || best > store.stats.bestPriceSeen)
           ? best
@@ -150,38 +184,47 @@ export class Monitor {
     this.log.info(
       {
         ads: ads.length,
-        matches: matches.length,
-        notify: toNotify.length,
+        users: userIds.length,
+        fetchMinRate,
         bestPrice: best,
-        minRate,
         pruned,
+        perUser: [...users.values()].map((u) => ({
+          userId: u.userId,
+          minRate: u.minRate,
+          matches: u.matches.length,
+          notify: u.notified.length,
+        })),
       },
       'check completed',
     );
 
-    if (toNotify.length > 0) {
+    for (const u of users.values()) {
+      if (u.notified.length === 0) continue;
       try {
-        await this.opts.onNewMatches(toNotify, minRate);
-        store.updateStats({ totalNotifications: store.stats.totalNotifications + toNotify.length });
+        await this.opts.onNewMatches(u.userId, u.notified, u.minRate);
+        store.updateUser(u.userId, {
+          totalNotifications:
+            (store.getUser(u.userId)?.totalNotifications ?? 0) + u.notified.length,
+        });
       } catch (err) {
-        // Do not mark as notified if delivery failed, so the next check retries.
-        for (const ad of toNotify) {
-          const t = store.getAd(ad.id);
+        // Do not mark as notified for this user, so the next check retries.
+        for (const ad of u.notified) {
+          const t = store.getAd(u.userId, ad.id);
           if (t)
-            store.setAd(ad.id, {
+            store.setAd(u.userId, ad.id, {
               ...t,
               lastAbove: false,
               notifyCount: Math.max(0, t.notifyCount - 1),
             });
         }
         this.log.error(
-          { err: errorMessage(err) },
+          { userId: u.userId, err: errorMessage(err) },
           'failed to deliver notifications; will retry next check',
         );
       }
     }
 
     await store.flushIfDirty();
-    return { ads, matches, notified: toNotify, minRate, checkedAt };
+    return { ads, users, fetchMinRate, checkedAt };
   }
 }

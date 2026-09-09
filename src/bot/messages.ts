@@ -15,7 +15,11 @@ export interface StatusInfo {
   fiat: string;
   pollIntervalMs: number;
   uptimeMs: number;
+  /** Shared monitor stats (one Binance check serves every user). */
   stats: MonitorStats;
+  /** This user's counters. */
+  totalNotifications: number;
+  lastMatchCount: number;
   trackedAds: number;
   cooldownMs: number;
   timezone: string;
@@ -144,9 +148,9 @@ export function statusMessage(info: StatusInfo): string {
       [
         `${pad('Проверка', 12)}${formatDateTime(lastOk, info.timezone)}`,
         `${pad('Объявлений', 12)}${s.lastAdsCount}`,
-        `${pad('Подходящих', 12)}${s.lastMatchCount}`,
+        `${pad('Подходящих', 12)}${info.lastMatchCount}`,
         `${pad('Лучший курс', 12)}${s.bestPriceSeen !== null ? formatNumber(s.bestPriceSeen, 4) : 'n/a'}`,
-        `${pad('Уведомлений', 12)}${s.totalNotifications}`,
+        `${pad('Уведомлений', 12)}${info.totalNotifications}`,
         `${pad('Проверок', 12)}${s.totalChecks}`,
         `${pad('В памяти', 12)}${info.trackedAds} ID`,
       ].join('\n'),
@@ -186,6 +190,7 @@ export function helpMessage(): string {
     `• Как только кто-то готов купить USDT по курсу не ниже порога, приходит уведомление.`,
     `• Одно и то же объявление не повторяется, пока его цена не упадёт ниже порога и не вернётся снова.`,
     `• Никаких сделок бот не совершает и доступа к аккаунту не имеет.`,
+    `• Порог у каждого пользователя свой: ваш /rate не влияет на других.`,
     '',
     `<b>Команды</b>`,
     `/check — проверить сейчас`,

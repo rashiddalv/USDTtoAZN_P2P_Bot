@@ -8,9 +8,30 @@ const numberFromEnv = (def: number) =>
     .transform((v) => (v === undefined || v.trim() === '' ? def : Number(v)))
     .pipe(z.number().finite());
 
+/** Comma/space separated list of positive integers, e.g. "123, 456". */
+const userIdList = z
+  .string()
+  .optional()
+  .transform((v, ctx) => {
+    const ids: number[] = [];
+    for (const part of (v ?? '').split(/[,\s]+/)) {
+      if (part === '') continue;
+      if (!/^\d+$/.test(part)) {
+        ctx.addIssue({ code: 'custom', message: `"${part}" is not a numeric Telegram user id` });
+        continue;
+      }
+      const id = Number(part);
+      if (!ids.includes(id)) ids.push(id);
+    }
+    return ids;
+  });
+
 const envSchema = z.object({
   TELEGRAM_BOT_TOKEN: z.string().min(10, 'TELEGRAM_BOT_TOKEN is required'),
-  TELEGRAM_ALLOWED_USER_ID: z.coerce.number().int().positive(),
+  /** Preferred: several users. */
+  TELEGRAM_ALLOWED_USER_IDS: userIdList,
+  /** Legacy single-user variable, still honoured (merged with the list above). */
+  TELEGRAM_ALLOWED_USER_ID: userIdList,
 
   MIN_RATE: numberFromEnv(1.7).pipe(z.number().positive()),
   POLL_INTERVAL_SECONDS: numberFromEnv(45).pipe(z.number().int().positive()),
@@ -32,7 +53,11 @@ const envSchema = z.object({
 export type LogLevel = z.infer<typeof envSchema>['LOG_LEVEL'];
 
 export interface AppConfig {
-  telegram: { token: string; allowedUserId: number };
+  telegram: {
+    token: string;
+    /** Users allowed to talk to the bot and receive alerts. First one is the primary (owner). */
+    allowedUserIds: number[];
+  };
   monitor: {
     defaultMinRate: number;
     pollIntervalMs: number;
@@ -62,10 +87,18 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     throw new Error(`Invalid environment configuration:\n${issues}`);
   }
   const e = parsed.data;
+  const allowedUserIds = [...e.TELEGRAM_ALLOWED_USER_ID, ...e.TELEGRAM_ALLOWED_USER_IDS].filter(
+    (id, i, arr) => arr.indexOf(id) === i,
+  );
+  if (allowedUserIds.length === 0) {
+    throw new Error(
+      'Invalid environment configuration:\n  - TELEGRAM_ALLOWED_USER_IDS: at least one Telegram user id is required',
+    );
+  }
   const pollSeconds = Math.max(e.POLL_INTERVAL_SECONDS, MIN_POLL_INTERVAL_SECONDS);
 
   return {
-    telegram: { token: e.TELEGRAM_BOT_TOKEN, allowedUserId: e.TELEGRAM_ALLOWED_USER_ID },
+    telegram: { token: e.TELEGRAM_BOT_TOKEN, allowedUserIds },
     monitor: {
       defaultMinRate: e.MIN_RATE,
       pollIntervalMs: pollSeconds * 1000,

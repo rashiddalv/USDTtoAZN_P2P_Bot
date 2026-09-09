@@ -2,6 +2,7 @@ import { Bot, GrammyError, HttpError, type Context, type InlineKeyboard } from '
 import type { AppConfig } from '../config/index.js';
 import type { CheckResult, Monitor } from '../monitor/monitor.js';
 import type { BinanceP2PService } from '../services/binanceP2P.service.js';
+import { matchesThreshold } from '../monitor/matcher.js';
 import type { P2PAd } from '../services/binanceP2P.types.js';
 import type { StateStore } from '../storage/stateStore.js';
 import { errorMessage, escapeHtml, formatNumber } from '../utils/format.js';
@@ -44,13 +45,13 @@ export function createBot(deps: BotDeps): Bot {
   const { config, store, monitor, provider } = deps;
   const log = deps.logger.child({ module: 'telegram' });
   const bot = new Bot(config.telegram.token);
-  const allowedId = config.telegram.allowedUserId;
+  const allowedIds = new Set(config.telegram.allowedUserIds);
   const { asset, fiat } = config.binance;
 
-  // ---- access control: single-user bot ----
+  // ---- access control: only whitelisted users; each gets their own settings ----
   bot.use(async (ctx, next) => {
     const fromId = ctx.from?.id;
-    if (fromId !== allowedId) {
+    if (fromId === undefined || !allowedIds.has(fromId)) {
       log.warn({ fromId, chatId: ctx.chat?.id, text: ctx.message?.text }, 'access denied');
       if (ctx.callbackQuery) {
         await ctx.answerCallbackQuery({ text: 'Access denied.' }).catch(() => undefined);
@@ -59,21 +60,38 @@ export function createBot(deps: BotDeps): Bot {
       }
       return;
     }
+    // First contact: register the user so the monitor starts evaluating ads for them.
+    if (!store.hasUser(fromId)) {
+      store.ensureUser(fromId);
+      await store.flushIfDirty();
+    }
     await next();
   });
 
-  const statusInfo = (): StatusInfo => ({
-    running: monitor.isRunning,
-    minRate: store.minRate,
-    asset,
-    fiat,
-    pollIntervalMs: monitor.pollIntervalMs,
-    uptimeMs: monitor.uptimeMs,
-    stats: store.stats,
-    trackedAds: store.trackedAdCount,
-    cooldownMs: provider.cooldownRemainingMs,
-    timezone: config.timezone,
-  });
+  /** Id of the user who sent the update. Only called after the access middleware. */
+  const userOf = (ctx: Context): number => {
+    const id = ctx.from?.id;
+    if (id === undefined) throw new Error('update without sender');
+    return id;
+  };
+
+  const statusInfo = (userId: number): StatusInfo => {
+    const user = store.ensureUser(userId);
+    return {
+      running: monitor.isRunning,
+      minRate: user.minRate,
+      asset,
+      fiat,
+      pollIntervalMs: monitor.pollIntervalMs,
+      uptimeMs: monitor.uptimeMs,
+      stats: store.stats,
+      totalNotifications: user.totalNotifications,
+      lastMatchCount: user.lastMatchCount,
+      trackedAds: store.trackedAdCountFor(userId),
+      cooldownMs: provider.cooldownRemainingMs,
+      timezone: config.timezone,
+    };
+  };
 
   /**
    * Show a screen: edit the message in place when triggered from a button,
@@ -93,11 +111,15 @@ export function createBot(deps: BotDeps): Bot {
     await ctx.reply(text, { ...HTML, reply_markup: keyboard });
   };
 
-  const renderCheck = (result: CheckResult) => {
+  const renderCheck = (result: CheckResult, userId: number) => {
+    // The check may have started before this user registered; fall back to a plain filter.
+    const mine = result.users.get(userId);
+    const minRate = mine?.minRate ?? store.ensureUser(userId).minRate;
+    const matches = mine?.matches ?? result.ads.filter((ad) => matchesThreshold(ad, minRate));
     const { text, shown } = checkResultMessage(
       result.ads,
-      result.matches,
-      result.minRate,
+      matches,
+      minRate,
       asset,
       fiat,
       config.monitor.checkTopN,
@@ -115,7 +137,7 @@ export function createBot(deps: BotDeps): Bot {
     }
     try {
       const result = await monitor.checkNow();
-      const { text, keyboard } = renderCheck(result);
+      const { text, keyboard } = renderCheck(result, userOf(ctx));
       await show(ctx, text, keyboard);
     } catch (err) {
       const msg = errorMessage(err);
@@ -136,11 +158,12 @@ export function createBot(deps: BotDeps): Bot {
       else await ctx.reply(text);
       return;
     }
+    const userId = userOf(ctx);
     const rounded = Math.round(value * 10_000) / 10_000;
-    const previous = store.minRate;
-    store.setMinRate(rounded);
+    const previous = store.ensureUser(userId).minRate;
+    store.setMinRate(userId, rounded);
     await store.flushIfDirty();
-    log.info({ previous, minRate: rounded }, 'min rate updated');
+    log.info({ userId, previous, minRate: rounded }, 'min rate updated');
     if (ctx.callbackQuery) {
       await ctx
         .answerCallbackQuery({ text: `Порог: ${formatNumber(rounded, 4)} ${fiat}` })
@@ -157,7 +180,7 @@ export function createBot(deps: BotDeps): Bot {
   // ---- commands ----
 
   bot.command('start', async (ctx) => {
-    await show(ctx, menuMessage(statusInfo()), mainMenuKeyboard(asset, fiat));
+    await show(ctx, menuMessage(statusInfo(userOf(ctx))), mainMenuKeyboard(asset, fiat));
   });
 
   bot.command('help', async (ctx) => {
@@ -165,7 +188,7 @@ export function createBot(deps: BotDeps): Bot {
   });
 
   bot.command('status', async (ctx) => {
-    await show(ctx, statusMessage(statusInfo()), statusKeyboard());
+    await show(ctx, statusMessage(statusInfo(userOf(ctx))), statusKeyboard());
   });
 
   bot.command('check', runCheck);
@@ -173,7 +196,8 @@ export function createBot(deps: BotDeps): Bot {
   bot.command('rate', async (ctx) => {
     const arg = ctx.match.trim().replace(',', '.');
     if (arg === '') {
-      await show(ctx, rateMenuMessage(store.minRate, fiat, asset), rateMenuKeyboard(store.minRate));
+      const current = store.ensureUser(userOf(ctx)).minRate;
+      await show(ctx, rateMenuMessage(current, fiat, asset), rateMenuKeyboard(current));
       return;
     }
     if (!/^\d+(\.\d+)?$/.test(arg)) {
@@ -190,7 +214,7 @@ export function createBot(deps: BotDeps): Bot {
 
   bot.callbackQuery(CB.menu, async (ctx) => {
     await ctx.answerCallbackQuery().catch(() => undefined);
-    await show(ctx, menuMessage(statusInfo()), mainMenuKeyboard(asset, fiat));
+    await show(ctx, menuMessage(statusInfo(userOf(ctx))), mainMenuKeyboard(asset, fiat));
   });
 
   bot.callbackQuery(CB.help, async (ctx) => {
@@ -200,19 +224,20 @@ export function createBot(deps: BotDeps): Bot {
 
   bot.callbackQuery(CB.status, async (ctx) => {
     await ctx.answerCallbackQuery({ text: 'Обновлено' }).catch(() => undefined);
-    await show(ctx, statusMessage(statusInfo()), statusKeyboard());
+    await show(ctx, statusMessage(statusInfo(userOf(ctx))), statusKeyboard());
   });
 
   bot.callbackQuery(CB.check, runCheck);
 
   bot.callbackQuery(CB.rateMenu, async (ctx) => {
     await ctx.answerCallbackQuery().catch(() => undefined);
-    await show(ctx, rateMenuMessage(store.minRate, fiat, asset), rateMenuKeyboard(store.minRate));
+    const current = store.ensureUser(userOf(ctx)).minRate;
+    await show(ctx, rateMenuMessage(current, fiat, asset), rateMenuKeyboard(current));
   });
 
   bot.callbackQuery(new RegExp(`^${CB.rateDelta}(-?\\d+(?:\\.\\d+)?)$`), async (ctx) => {
     const delta = Number(ctx.match[1]);
-    await applyRate(ctx, store.minRate + delta);
+    await applyRate(ctx, store.ensureUser(userOf(ctx)).minRate + delta);
   });
 
   bot.callbackQuery(new RegExp(`^${CB.rateSet}(\\d+(?:\\.\\d+)?)$`), async (ctx) => {
@@ -243,10 +268,14 @@ export function createBot(deps: BotDeps): Bot {
   return bot;
 }
 
-/** Sends one alert per ad to the allowed user. Throws if *all* sends failed. */
+/**
+ * Sends one alert per ad to `userId`. Throws if *all* sends failed, so the monitor
+ * can retry on the next check. A user who blocked the bot (403) is treated as delivered:
+ * retrying would only spam the log every check.
+ */
 export async function sendAlerts(
   bot: Bot,
-  config: AppConfig,
+  userId: number,
   ads: P2PAd[],
   minRate: number,
   log: Logger,
@@ -254,14 +283,21 @@ export async function sendAlerts(
   let failures = 0;
   for (const ad of ads) {
     try {
-      await bot.api.sendMessage(config.telegram.allowedUserId, adAlertMessage(ad, minRate), {
+      await bot.api.sendMessage(userId, adAlertMessage(ad, minRate), {
         ...HTML,
         reply_markup: alertKeyboard(ad),
       });
-      log.info({ advNo: ad.id, price: ad.price, nick: ad.advertiser.nickName }, 'alert sent');
+      log.info(
+        { userId, advNo: ad.id, price: ad.price, nick: ad.advertiser.nickName },
+        'alert sent',
+      );
     } catch (err) {
+      if (err instanceof GrammyError && err.error_code === 403) {
+        log.warn({ userId, err: errorMessage(err) }, 'user blocked the bot; skipping alerts');
+        return;
+      }
       failures++;
-      log.error({ advNo: ad.id, err: errorMessage(err) }, 'failed to send alert');
+      log.error({ userId, advNo: ad.id, err: errorMessage(err) }, 'failed to send alert');
       if (err instanceof GrammyError && err.error_code === 429) {
         const retryAfter = (err.parameters.retry_after ?? 5) * 1000;
         await new Promise((r) => setTimeout(r, retryAfter));

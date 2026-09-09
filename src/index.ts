@@ -18,12 +18,20 @@ async function main(): Promise<void> {
       fiat: config.binance.fiat,
       pollIntervalMs: config.monitor.pollIntervalMs,
       timezone: config.timezone,
+      allowedUsers: config.telegram.allowedUserIds.length,
       node: process.version,
     },
     'starting binance-p2p-alert',
   );
 
-  const store = new StateStore(config.dataDir, config.monitor.defaultMinRate, logger);
+  const store = new StateStore(
+    config.dataDir,
+    {
+      defaultMinRate: config.monitor.defaultMinRate,
+      primaryUserId: config.telegram.allowedUserIds[0],
+    },
+    logger,
+  );
   await store.load();
 
   const provider = new BinanceP2PService({
@@ -43,9 +51,11 @@ async function main(): Promise<void> {
     pollIntervalMs: config.monitor.pollIntervalMs,
     notifiedTtlMs: config.monitor.notifiedTtlMs,
     maxPages: config.binance.maxPages,
-    onNewMatches: (ads, minRate) => {
+    defaultMinRate: config.monitor.defaultMinRate,
+    allowedUserIds: config.telegram.allowedUserIds,
+    onNewMatches: (userId, ads, minRate) => {
       if (!botRef) return Promise.reject(new Error('bot not initialised'));
-      return sendAlerts(botRef, config, ads, minRate, logger.child({ module: 'alerts' }));
+      return sendAlerts(botRef, userId, ads, minRate, logger.child({ module: 'alerts' }));
     },
   });
   const bot = createBot({ config, store, monitor, provider, logger });
