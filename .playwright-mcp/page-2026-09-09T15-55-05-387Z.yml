@@ -1,0 +1,137 @@
+- generic [ref=f3e1]:
+  - generic [ref=f3e5]:
+    - generic [ref=f3e6]:
+      - link [ref=f3e8] [cursor=pointer]:
+        - /url: /
+        - img "moghtech" [ref=f3e10]
+      - generic [ref=f3e11]:
+        - button [ref=f3e13] [cursor=pointer]
+        - button [ref=f3e19] [cursor=pointer]
+        - button [ref=f3e23] [cursor=pointer]
+        - button "ThemeToggle" [ref=f3e31] [cursor=pointer]
+        - button [ref=f3e39] [cursor=pointer]
+    - navigation [ref=f3e45]:
+      - generic [ref=f3e50]:
+        - link "Dashboard" [ref=f3e51] [cursor=pointer]:
+          - /url: /
+        - link "Containers" [ref=f3e60] [cursor=pointer]:
+          - /url: /containers
+        - link "Terminals" [ref=f3e67] [cursor=pointer]:
+          - /url: /terminals
+        - link "Stats" [ref=f3e73] [cursor=pointer]:
+          - /url: /stats
+        - separator [ref=f3e80]:
+          - paragraph [ref=f3e82]: Resources
+        - link "Servers" [ref=f3e83] [cursor=pointer]:
+          - /url: /servers
+        - link "Swarms" [ref=f3e90] [cursor=pointer]:
+          - /url: /swarms
+        - link "Stacks" [active] [ref=f3e99] [cursor=pointer]:
+          - /url: /stacks
+        - link "Deployments" [ref=f3e107] [cursor=pointer]:
+          - /url: /deployments
+        - link "Builds" [ref=f3e116] [cursor=pointer]:
+          - /url: /builds
+        - link "Repos" [ref=f3e124] [cursor=pointer]:
+          - /url: /repos
+        - link "Procedures" [ref=f3e131] [cursor=pointer]:
+          - /url: /procedures
+        - link "Actions" [ref=f3e139] [cursor=pointer]:
+          - /url: /actions
+        - link "Syncs" [ref=f3e148] [cursor=pointer]:
+          - /url: /resource-syncs
+        - separator [ref=f3e158]:
+          - paragraph [ref=f3e160]: Notifications
+        - link "Alerts" [ref=f3e161] [cursor=pointer]:
+          - /url: /alerts
+        - link "Updates" [ref=f3e167] [cursor=pointer]:
+          - /url: /updates
+        - separator [ref=f3e174]
+        - link "Schedules" [ref=f3e175] [cursor=pointer]:
+          - /url: /schedules
+        - link "Settings" [ref=f3e181] [cursor=pointer]:
+          - /url: /settings
+    - main [ref=f3e188]:
+      - generic [ref=f3e190]:
+        - generic [ref=f3e191]:
+          - generic [ref=f3e192]:
+            - paragraph [ref=f3e198]: Stacks
+            - paragraph [ref=f3e199]: Deploy docker compose files.
+          - button "Toml" [ref=f3e201] [cursor=pointer]
+        - generic [ref=f3e209]:
+          - generic [ref=f3e210]:
+            - generic [ref=f3e211]:
+              - button "New Stack" [ref=f3e212] [cursor=pointer]
+              - button "Execute" [disabled] [ref=f3e217]
+            - generic [ref=f3e226]:
+              - generic [ref=f3e227] [cursor=pointer]:
+                - paragraph [ref=f3e228]: Pending Update
+                - generic:
+                  - generic:
+                    - switch
+              - combobox [ref=f3e238] [cursor=pointer]: Exclude Templates
+              - button "Tag Filter" [ref=f3e240] [cursor=pointer]
+              - textbox "search..." [ref=f3e256]
+          - table [ref=f3e258]:
+            - rowgroup [ref=f3e259]:
+              - row [ref=f3e260]:
+                - columnheader [ref=f3e261] [cursor=pointer]:
+                  - checkbox [ref=f3e265]
+                - columnheader [ref=f3e266] [cursor=pointer]:
+                  - paragraph [ref=f3e267]:
+                    - button [ref=f3e268]:
+                      - paragraph [ref=f3e271]: Name
+                - columnheader [ref=f3e274] [cursor=pointer]:
+                  - paragraph [ref=f3e275]:
+                    - button [ref=f3e276]:
+                      - paragraph [ref=f3e279]: Source
+                - columnheader [ref=f3e282] [cursor=pointer]:
+                  - paragraph [ref=f3e283]:
+                    - button [ref=f3e284]:
+                      - paragraph [ref=f3e287]: Host
+                - columnheader [ref=f3e290] [cursor=pointer]:
+                  - paragraph [ref=f3e291]:
+                    - button [ref=f3e292]:
+                      - paragraph [ref=f3e295]: State
+                - columnheader [ref=f3e298] [cursor=pointer]:
+                  - paragraph [ref=f3e299]: Tags
+            - rowgroup [ref=f3e300]:
+              - row [ref=f3e301]:
+                - cell [ref=f3e302]:
+                  - checkbox "Select row" [ref=f3e306] [cursor=pointer]
+                - cell [ref=f3e307]:
+                  - link [ref=f3e309] [cursor=pointer]:
+                    - /url: /stacks/6a9cca2ef4292d30ddc2b130
+                    - paragraph [ref=f3e314]: rashid-kiraye
+                - cell [ref=f3e315]:
+                  - link [ref=f3e316] [cursor=pointer]:
+                    - /url: /repos/6a9cc88af4292d30ddc2b10d
+                    - paragraph [ref=f3e320]: rashid-kiraye
+                - cell [ref=f3e321]:
+                  - link [ref=f3e322] [cursor=pointer]:
+                    - /url: /servers/6a9c8dedf4292d30ddc2acde
+                    - paragraph [ref=f3e326]: the-media-server
+                - cell [ref=f3e327]:
+                  - paragraph [ref=f3e328]: RUNNING
+                - cell [ref=f3e329]
+              - row [ref=f3e330]:
+                - cell [ref=f3e331]:
+                  - checkbox "Select row" [ref=f3e335] [cursor=pointer]
+                - cell [ref=f3e336]:
+                  - link [ref=f3e338] [cursor=pointer]:
+                    - /url: /stacks/6aa180f7f4292d30ddc3020c
+                    - paragraph [ref=f3e343]: usdt-azn-p2p-bot
+                - cell [ref=f3e344]:
+                  - link [ref=f3e345] [cursor=pointer]:
+                    - /url: https://github.com/rashiddalv/USDTtoAZN_P2P_Bot/tree/main
+                    - paragraph [ref=f3e349]: rashiddalv/USDTtoAZN_P2P_Bot
+                - cell [ref=f3e350]:
+                  - link [ref=f3e351] [cursor=pointer]:
+                    - /url: /servers/6a9c8dedf4292d30ddc2acde
+                    - paragraph [ref=f3e355]: the-media-server
+                - cell [ref=f3e356]:
+                  - paragraph [ref=f3e357]: RUNNING
+                - cell [ref=f3e358]
+  - generic [ref=f3e359]:
+    - alert
+    - alert

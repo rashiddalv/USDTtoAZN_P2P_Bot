@@ -1,16 +1,27 @@
-import { Bot, GrammyError, HttpError, InlineKeyboard, type Context } from 'grammy';
+import { Bot, GrammyError, HttpError, type Context, type InlineKeyboard } from 'grammy';
 import type { AppConfig } from '../config/index.js';
-import type { Monitor } from '../monitor/monitor.js';
+import type { CheckResult, Monitor } from '../monitor/monitor.js';
 import type { BinanceP2PService } from '../services/binanceP2P.service.js';
 import type { P2PAd } from '../services/binanceP2P.types.js';
 import type { StateStore } from '../storage/stateStore.js';
 import { errorMessage, escapeHtml, formatNumber } from '../utils/format.js';
 import type { Logger } from '../utils/logger.js';
 import {
+  CB,
+  alertKeyboard,
+  backToMenuKeyboard,
+  checkResultKeyboard,
+  mainMenuKeyboard,
+  rateMenuKeyboard,
+  statusKeyboard,
+} from './keyboards.js';
+import {
   adAlertMessage,
   checkResultMessage,
-  rateUsageMessage,
-  startMessage,
+  helpMessage,
+  menuMessage,
+  rateMenuMessage,
+  rateUpdatedMessage,
   statusMessage,
   type StatusInfo,
 } from './messages.js';
@@ -23,22 +34,27 @@ export interface BotDeps {
   logger: Logger;
 }
 
-/** Sanity bounds for /rate: AZN is pegged ~1.70 per USD, so anything far outside is a typo. */
-const RATE_MIN = 0.5;
-const RATE_MAX = 10;
+/** Sanity bounds for the threshold: AZN is pegged ~1.70 per USD, anything far outside is a typo. */
+export const RATE_MIN = 0.5;
+export const RATE_MAX = 10;
+
+const HTML = { parse_mode: 'HTML' as const, link_preview_options: { is_disabled: true } };
 
 export function createBot(deps: BotDeps): Bot {
   const { config, store, monitor, provider } = deps;
   const log = deps.logger.child({ module: 'telegram' });
   const bot = new Bot(config.telegram.token);
   const allowedId = config.telegram.allowedUserId;
+  const { asset, fiat } = config.binance;
 
   // ---- access control: single-user bot ----
   bot.use(async (ctx, next) => {
     const fromId = ctx.from?.id;
     if (fromId !== allowedId) {
       log.warn({ fromId, chatId: ctx.chat?.id, text: ctx.message?.text }, 'access denied');
-      if (ctx.chat?.type === 'private') {
+      if (ctx.callbackQuery) {
+        await ctx.answerCallbackQuery({ text: 'Access denied.' }).catch(() => undefined);
+      } else if (ctx.chat?.type === 'private') {
         await ctx.reply('Access denied.').catch(() => undefined);
       }
       return;
@@ -49,8 +65,8 @@ export function createBot(deps: BotDeps): Bot {
   const statusInfo = (): StatusInfo => ({
     running: monitor.isRunning,
     minRate: store.minRate,
-    asset: config.binance.asset,
-    fiat: config.binance.fiat,
+    asset,
+    fiat,
     pollIntervalMs: monitor.pollIntervalMs,
     uptimeMs: monitor.uptimeMs,
     stats: store.stats,
@@ -59,39 +75,65 @@ export function createBot(deps: BotDeps): Bot {
     timezone: config.timezone,
   });
 
-  const replyHtml = (ctx: Context, text: string, extra: Record<string, unknown> = {}) =>
-    ctx.reply(text, { parse_mode: 'HTML', link_preview_options: { is_disabled: true }, ...extra });
-
-  bot.command(['start', 'help'], async (ctx) => {
-    await replyHtml(ctx, startMessage(statusInfo()));
-  });
-
-  bot.command('status', async (ctx) => {
-    await replyHtml(ctx, statusMessage(statusInfo()));
-  });
-
-  bot.command('rate', async (ctx) => {
-    const arg = ctx.match.trim().replace(',', '.');
-    if (arg === '') {
-      await replyHtml(
-        ctx,
-        rateUsageMessage(store.minRate, config.binance.fiat, config.binance.asset),
-      );
-      return;
+  /**
+   * Show a screen: edit the message in place when triggered from a button,
+   * otherwise send a new message. "message is not modified" is ignored.
+   */
+  const show = async (ctx: Context, text: string, keyboard: InlineKeyboard): Promise<void> => {
+    if (ctx.callbackQuery?.message) {
+      try {
+        await ctx.editMessageText(text, { ...HTML, reply_markup: keyboard });
+        return;
+      } catch (err) {
+        if (err instanceof GrammyError && err.description.includes('message is not modified'))
+          return;
+        log.debug({ err: errorMessage(err) }, 'edit failed, sending new message');
+      }
     }
-    if (!/^\d+(\.\d+)?$/.test(arg)) {
-      await replyHtml(
-        ctx,
-        `❌ Некорректное значение <code>${escapeHtml(arg)}</code>. Пример: <code>/rate 1.705</code>`,
-      );
-      return;
+    await ctx.reply(text, { ...HTML, reply_markup: keyboard });
+  };
+
+  const renderCheck = (result: CheckResult) => {
+    const { text, shown } = checkResultMessage(
+      result.ads,
+      result.matches,
+      result.minRate,
+      asset,
+      fiat,
+      config.monitor.checkTopN,
+      result.checkedAt,
+      config.timezone,
+    );
+    return { text, keyboard: checkResultKeyboard(shown, asset, fiat) };
+  };
+
+  const runCheck = async (ctx: Context): Promise<void> => {
+    if (ctx.callbackQuery) {
+      await ctx.answerCallbackQuery({ text: '⏳ Проверяю Binance…' }).catch(() => undefined);
+    } else {
+      await ctx.replyWithChatAction('typing').catch(() => undefined);
     }
-    const value = Number(arg);
+    try {
+      const result = await monitor.checkNow();
+      const { text, keyboard } = renderCheck(result);
+      await show(ctx, text, keyboard);
+    } catch (err) {
+      const msg = errorMessage(err);
+      log.error({ err: msg }, 'check failed');
+      await show(
+        ctx,
+        `❌ <b>Не удалось получить данные</b>\n<code>${escapeHtml(msg)}</code>`,
+        backToMenuKeyboard(),
+      );
+    }
+  };
+
+  const applyRate = async (ctx: Context, value: number): Promise<void> => {
     if (!Number.isFinite(value) || value < RATE_MIN || value > RATE_MAX) {
-      await replyHtml(
-        ctx,
-        `❌ Курс должен быть в диапазоне ${RATE_MIN}–${RATE_MAX} ${escapeHtml(config.binance.fiat)}.`,
-      );
+      const text = `❌ Курс должен быть в диапазоне ${RATE_MIN}–${RATE_MAX} ${escapeHtml(fiat)}.`;
+      if (ctx.callbackQuery)
+        await ctx.answerCallbackQuery({ text, show_alert: true }).catch(() => undefined);
+      else await ctx.reply(text);
       return;
     }
     const rounded = Math.round(value * 10_000) / 10_000;
@@ -99,63 +141,106 @@ export function createBot(deps: BotDeps): Bot {
     store.setMinRate(rounded);
     await store.flushIfDirty();
     log.info({ previous, minRate: rounded }, 'min rate updated');
-    await replyHtml(
-      ctx,
-      `✅ Порог обновлён: <b>${formatNumber(rounded, 4)} ${escapeHtml(config.binance.fiat)}</b> (было ${formatNumber(previous, 4)}).\n` +
-        'Применится со следующей проверки. Объявления, которые впервые пересекут новый порог, будут отправлены.',
-    );
+    if (ctx.callbackQuery) {
+      await ctx
+        .answerCallbackQuery({ text: `Порог: ${formatNumber(rounded, 4)} ${fiat}` })
+        .catch(() => undefined);
+      await show(ctx, rateMenuMessage(rounded, fiat, asset), rateMenuKeyboard(rounded));
+    } else {
+      await ctx.reply(rateUpdatedMessage(previous, rounded, fiat), {
+        ...HTML,
+        reply_markup: backToMenuKeyboard(),
+      });
+    }
+  };
+
+  // ---- commands ----
+
+  bot.command('start', async (ctx) => {
+    await show(ctx, menuMessage(statusInfo()), mainMenuKeyboard(asset, fiat));
   });
 
-  bot.command('check', async (ctx) => {
-    const pending = await ctx.reply('⏳ Проверяю Binance P2P…');
-    try {
-      const result = await monitor.checkNow();
-      const text = checkResultMessage(
-        result.ads,
-        result.matches,
-        result.minRate,
-        config.binance.asset,
-        config.binance.fiat,
-        config.monitor.checkTopN,
-      );
-      await ctx.api.editMessageText(pending.chat.id, pending.message_id, text, {
-        parse_mode: 'HTML',
-        link_preview_options: { is_disabled: true },
-        reply_markup: new InlineKeyboard().url('Открыть список на Binance', marketUrl(config)),
-      });
-    } catch (err) {
-      const msg = errorMessage(err);
-      log.error({ err: msg }, '/check failed');
-      await ctx.api
-        .editMessageText(
-          pending.chat.id,
-          pending.message_id,
-          `❌ Не удалось получить данные: ${escapeHtml(msg)}`,
-          {
-            parse_mode: 'HTML',
-          },
-        )
-        .catch(() => undefined);
+  bot.command('help', async (ctx) => {
+    await show(ctx, helpMessage(), backToMenuKeyboard());
+  });
+
+  bot.command('status', async (ctx) => {
+    await show(ctx, statusMessage(statusInfo()), statusKeyboard());
+  });
+
+  bot.command('check', runCheck);
+
+  bot.command('rate', async (ctx) => {
+    const arg = ctx.match.trim().replace(',', '.');
+    if (arg === '') {
+      await show(ctx, rateMenuMessage(store.minRate, fiat, asset), rateMenuKeyboard(store.minRate));
+      return;
     }
+    if (!/^\d+(\.\d+)?$/.test(arg)) {
+      await ctx.reply(
+        `❌ Некорректное значение <code>${escapeHtml(arg)}</code>. Пример: <code>/rate 1.705</code>`,
+        HTML,
+      );
+      return;
+    }
+    await applyRate(ctx, Number(arg));
+  });
+
+  // ---- inline buttons ----
+
+  bot.callbackQuery(CB.menu, async (ctx) => {
+    await ctx.answerCallbackQuery().catch(() => undefined);
+    await show(ctx, menuMessage(statusInfo()), mainMenuKeyboard(asset, fiat));
+  });
+
+  bot.callbackQuery(CB.help, async (ctx) => {
+    await ctx.answerCallbackQuery().catch(() => undefined);
+    await show(ctx, helpMessage(), backToMenuKeyboard());
+  });
+
+  bot.callbackQuery(CB.status, async (ctx) => {
+    await ctx.answerCallbackQuery({ text: 'Обновлено' }).catch(() => undefined);
+    await show(ctx, statusMessage(statusInfo()), statusKeyboard());
+  });
+
+  bot.callbackQuery(CB.check, runCheck);
+
+  bot.callbackQuery(CB.rateMenu, async (ctx) => {
+    await ctx.answerCallbackQuery().catch(() => undefined);
+    await show(ctx, rateMenuMessage(store.minRate, fiat, asset), rateMenuKeyboard(store.minRate));
+  });
+
+  bot.callbackQuery(new RegExp(`^${CB.rateDelta}(-?\\d+(?:\\.\\d+)?)$`), async (ctx) => {
+    const delta = Number(ctx.match[1]);
+    await applyRate(ctx, store.minRate + delta);
+  });
+
+  bot.callbackQuery(new RegExp(`^${CB.rateSet}(\\d+(?:\\.\\d+)?)$`), async (ctx) => {
+    await applyRate(ctx, Number(ctx.match[1]));
+  });
+
+  bot.on('callback_query:data', async (ctx) => {
+    await ctx
+      .answerCallbackQuery({ text: 'Кнопка устарела, откройте /start' })
+      .catch(() => undefined);
   });
 
   bot.on('message', async (ctx) => {
-    await replyHtml(ctx, 'Неизвестная команда. Доступно: /status, /rate, /check, /help');
+    await show(ctx, 'Не понял команду. Используйте меню ниже 👇', mainMenuKeyboard(asset, fiat));
   });
 
   bot.catch((err) => {
-    const e = err.error;
-    if (e instanceof GrammyError)
-      log.error({ description: e.description, method: e.method }, 'Telegram API error');
-    else if (e instanceof HttpError) log.error({ err: errorMessage(e) }, 'Telegram HTTP error');
-    else log.error({ err: errorMessage(e) }, 'unhandled bot error');
+    const cause = err.error;
+    if (cause instanceof GrammyError) {
+      log.error({ description: cause.description, method: cause.method }, 'Telegram API error');
+    } else if (cause instanceof HttpError) {
+      log.error({ err: errorMessage(cause) }, 'Telegram HTTP error');
+    } else {
+      log.error({ err: errorMessage(cause) }, 'unhandled bot error');
+    }
   });
 
   return bot;
-}
-
-export function marketUrl(config: AppConfig): string {
-  return `https://p2p.binance.com/en/trade/sell/${encodeURIComponent(config.binance.asset)}?fiat=${encodeURIComponent(config.binance.fiat)}&payment=all-payments`;
 }
 
 /** Sends one alert per ad to the allowed user. Throws if *all* sends failed. */
@@ -163,18 +248,15 @@ export async function sendAlerts(
   bot: Bot,
   config: AppConfig,
   ads: P2PAd[],
+  minRate: number,
   log: Logger,
 ): Promise<void> {
   let failures = 0;
   for (const ad of ads) {
     try {
-      await bot.api.sendMessage(config.telegram.allowedUserId, adAlertMessage(ad), {
-        parse_mode: 'HTML',
-        link_preview_options: { is_disabled: true },
-        reply_markup: new InlineKeyboard()
-          .url('Открыть на Binance', ad.advertiserUrl)
-          .row()
-          .url('Список объявлений', ad.marketUrl),
+      await bot.api.sendMessage(config.telegram.allowedUserId, adAlertMessage(ad, minRate), {
+        ...HTML,
+        reply_markup: alertKeyboard(ad),
       });
       log.info({ advNo: ad.id, price: ad.price, nick: ad.advertiser.nickName }, 'alert sent');
     } catch (err) {

@@ -1,5 +1,6 @@
 import type { Logger } from '../utils/logger.js';
 import { RetryableError, withRetry } from '../utils/retry.js';
+import { advertiserAppUrl, advertiserWebUrl, marketAppUrl, marketWebUrl } from './binanceLinks.js';
 import type {
   BinanceP2PAdItem,
   BinanceP2PSearchRequest,
@@ -257,9 +258,6 @@ export class BinanceP2PService implements P2PAdsProvider {
       .map((s) => s.trim())
       .filter((s) => s.length > 0);
 
-    const sideForUser = 'sell';
-    const marketUrl = `https://p2p.binance.com/en/trade/${sideForUser}/${encodeURIComponent(adv.asset)}?fiat=${encodeURIComponent(adv.fiatUnit)}&payment=all-payments`;
-
     return {
       id: adv.advNo,
       asset: adv.asset,
@@ -280,8 +278,10 @@ export class BinanceP2PService implements P2PAdsProvider {
         isMerchant: advertiser.userType === 'merchant' || advertiser.proMerchant === true,
       },
       paymentMethods,
-      advertiserUrl: `https://p2p.binance.com/en/advertiserDetail?advertiserNo=${encodeURIComponent(advertiser.userNo)}`,
-      marketUrl,
+      advertiserUrl: advertiserWebUrl(advertiser.userNo),
+      advertiserAppUrl: advertiserAppUrl(advertiser.userNo),
+      marketUrl: marketWebUrl(adv.asset, adv.fiatUnit, 'sell'),
+      marketAppUrl: marketAppUrl(adv.asset, adv.fiatUnit, 'sell'),
     };
   }
 }

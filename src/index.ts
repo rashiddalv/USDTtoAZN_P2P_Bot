@@ -43,9 +43,9 @@ async function main(): Promise<void> {
     pollIntervalMs: config.monitor.pollIntervalMs,
     notifiedTtlMs: config.monitor.notifiedTtlMs,
     maxPages: config.binance.maxPages,
-    onNewMatches: (ads) => {
+    onNewMatches: (ads, minRate) => {
       if (!botRef) return Promise.reject(new Error('bot not initialised'));
-      return sendAlerts(botRef, config, ads, logger.child({ module: 'alerts' }));
+      return sendAlerts(botRef, config, ads, minRate, logger.child({ module: 'alerts' }));
     },
   });
   const bot = createBot({ config, store, monitor, provider, logger });
@@ -86,10 +86,11 @@ async function main(): Promise<void> {
 
   // ---- start ----
   await bot.api.setMyCommands([
-    { command: 'start', description: 'Описание и текущие настройки' },
+    { command: 'start', description: 'Главное меню' },
     { command: 'status', description: 'Состояние мониторинга' },
     { command: 'rate', description: 'Изменить минимальный курс, напр. /rate 1.705' },
     { command: 'check', description: 'Проверить сейчас и показать лучшие предложения' },
+    { command: 'help', description: 'Как работает бот и ссылки' },
   ]);
 
   monitor.start();

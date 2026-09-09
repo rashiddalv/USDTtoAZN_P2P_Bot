@@ -23,7 +23,9 @@ function ad(id: string, price: number): P2PAd {
     },
     paymentMethods: ['M10'],
     advertiserUrl: 'https://example.test/a',
+    advertiserAppUrl: 'https://example.test/app-a',
     marketUrl: 'https://example.test/m',
+    marketAppUrl: 'https://example.test/app-m',
   };
 }
 

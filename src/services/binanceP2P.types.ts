@@ -109,10 +109,14 @@ export interface P2PAd {
     isMerchant: boolean;
   };
   paymentMethods: string[];
-  /** Direct link to the advertiser page on Binance P2P */
+  /** Web link to the advertiser page on Binance P2P */
   advertiserUrl: string;
-  /** Link to the market list on Binance P2P for this pair/side */
+  /** Universal link that opens the advertiser page inside the Binance app */
+  advertiserAppUrl: string;
+  /** Web link to the market list on Binance P2P for this pair/side */
   marketUrl: string;
+  /** Universal link that opens the market list inside the Binance app */
+  marketAppUrl: string;
 }
 
 /** Abstraction so the Binance integration can be swapped for another provider. */
