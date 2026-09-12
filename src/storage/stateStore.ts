@@ -285,6 +285,10 @@ export class StateStore {
     return n;
   }
 
+  adIdsFor(userId: number): string[] {
+    return Object.keys(this.state.users[String(userId)]?.ads ?? {});
+  }
+
   trackedAdCountFor(userId: number): number {
     return Object.keys(this.state.users[String(userId)]?.ads ?? {}).length;
   }

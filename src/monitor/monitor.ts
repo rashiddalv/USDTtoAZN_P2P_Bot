@@ -3,7 +3,7 @@ import type { StateStore } from '../storage/stateStore.js';
 import { errorMessage } from '../utils/format.js';
 import type { Logger } from '../utils/logger.js';
 import { sleep } from '../utils/sleep.js';
-import { evaluateAds } from './matcher.js';
+import { evaluateAds, markUnseenAsBelow } from './matcher.js';
 
 export interface MonitorOptions {
   provider: P2PAdsProvider;
@@ -165,6 +165,15 @@ export class Monitor {
         checkedAt,
       );
       for (const [id, track] of tracks) store.setAd(userId, id, track);
+      const vanished = markUnseenAsBelow(
+        store.adIdsFor(userId),
+        new Set(tracks.keys()),
+        (id) => store.getAd(userId, id),
+        (id, t) => store.setAd(userId, id, t),
+      );
+      if (vanished.length > 0) {
+        this.log.debug({ userId, vanished }, 'matching ads disappeared from results');
+      }
       store.updateUser(userId, { lastMatchCount: matches.length });
       users.set(userId, { userId, minRate, matches, notified: toNotify });
     }
@@ -214,6 +223,8 @@ export class Monitor {
             store.setAd(u.userId, ad.id, {
               ...t,
               lastAbove: false,
+              // Clear the timestamp too, otherwise the retry would hit the re-notify cooldown.
+              notifiedAt: null,
               notifyCount: Math.max(0, t.notifyCount - 1),
             });
         }

@@ -153,6 +153,41 @@ describe('Monitor (multi-user)', () => {
 
     store.setMinRate(OWNER, 1.7);
     await monitor.checkNow();
-    expect(onNewMatches).toHaveBeenCalledTimes(2); // crossed again from below
+    expect(onNewMatches).toHaveBeenCalledTimes(1); // still inside the re-notify cooldown
+
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(Date.now() + 10 * 60_000);
+      await monitor.checkNow();
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(onNewMatches).toHaveBeenCalledTimes(2); // crossed again from below, cooldown over
+  });
+
+  it('notifies again when a matching ad vanishes and later reappears', async () => {
+    const good = [ad('a', 1.72)];
+    let current = good;
+    const { store, monitor, fetchBuyerAds, onNewMatches } = await setup(good);
+    fetchBuyerAds.mockImplementation(async () => current);
+    store.ensureUser(OWNER);
+    await monitor.checkNow();
+    expect(onNewMatches).toHaveBeenCalledTimes(1);
+
+    current = [ad('other', 1.6)]; // 'a' sold out / paused
+    await monitor.checkNow();
+    expect(store.getAd(OWNER, 'a')?.lastAbove).toBe(false);
+    expect(onNewMatches).toHaveBeenCalledTimes(1);
+
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(Date.now() + 10 * 60_000);
+      current = good; // back with the same ad id
+      await monitor.checkNow();
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(onNewMatches).toHaveBeenCalledTimes(2);
+    expect(store.getUser(OWNER)?.totalNotifications).toBe(2);
   });
 });
